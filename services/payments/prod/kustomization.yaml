@@ -13,6 +13,8 @@ patches:
 - patch: |-
     apiVersion: forge.dev/v1alpha1
     kind: ForgeService
+    metadata:
+      name: payments
     spec:
       env:
         - name: LOG_LEVEL
