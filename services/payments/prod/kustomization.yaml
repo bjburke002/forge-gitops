@@ -4,7 +4,7 @@ namespace: payments-prod
 resources:
 - ../base
 
-image:
+images:
 - name: payments-api
   newName: 241197444395.dkr.ecr.us-east-1.amazonaws.com/forge/payments-api
   newTag: cec257e8b2b904c24a5473d4a1ec7dd1bd6bdf8c
