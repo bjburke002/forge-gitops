@@ -23,4 +23,6 @@ patches:
       env:
         - name: LOG_LEVEL
           value: debug
+        - name: ERROR_RATE
+          value: "0.1"
       slo: null
