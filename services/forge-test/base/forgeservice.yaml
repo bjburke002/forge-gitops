@@ -1,0 +1,31 @@
+apiVersion: forge.dev/v1alpha1
+kind: ForgeService
+metadata:
+  name: forge-test
+spec:
+  env:
+  - name: LOG_LEVEL
+    value: info
+  health:
+    liveness: /health/live
+    readiness: /health/ready
+  image: payments-api
+  ingress:
+    host: forge-test.forgeappservices.com
+  observability:
+    metricsPort: 9090
+  owner: forge-team
+  resources:
+    limits:
+      memory: 128Mi
+    requests:
+      cpu: 25m
+      memory: 32Mi
+  runtime:
+    port: 8080
+  scaling:
+    maxReplicas: 5
+    minReplicas: 2
+  slo:
+    availability: "99.9"
+    latencyP99Ms: 500
