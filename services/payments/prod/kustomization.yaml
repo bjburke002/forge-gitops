@@ -1,14 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: payments-prod
-resources:
-- ../base
-
 images:
 - name: payments-api
   newName: 241197444395.dkr.ecr.us-east-1.amazonaws.com/forge/payments-api
-  newTag: cec257e8b2b904c24a5473d4a1ec7dd1bd6bdf8c
-
+  newTag: 19b466d89f14a18ba04d93f33414808dc593d2b9
+kind: Kustomization
+namespace: payments-prod
 patches:
 - patch: |-
     apiVersion: forge.dev/v1alpha1
@@ -19,3 +15,5 @@ patches:
       env:
         - name: LOG_LEVEL
           value: info
+resources:
+- ../base
