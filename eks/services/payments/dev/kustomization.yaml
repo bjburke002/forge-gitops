@@ -7,7 +7,7 @@ resources:
 images:
 - name: payments-api
   newName: 241197444395.dkr.ecr.us-east-1.amazonaws.com/forge/payments-api
-  newTag: 19b466d89f14a18ba04d93f33414808dc593d2b9
+  newTag: 1af66d22ef23df1e1a7ac1b608d6124264e8d483
 
 patches:
 - patch: |-
