@@ -1,0 +1,154 @@
+name: Deploy ECS services
+
+on:
+  push:
+    branches:
+      - main
+    paths: ['ecs/services/**']
+  workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: "Deploy all ECS services"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  FORGE_VERSION: v0.2.0
+
+jobs:
+  detect:
+    name: "Find services to deploy"
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.ECS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Outputs a JSON list of {name, env, action}; empty when ECS is down or nothing changed.
+      - name: List changed services
+        id: targets
+        env:
+          DEPLOY_ALL: ${{ inputs.deploy_all }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The ECS root writes /forge/ecs/* and destroys it on ecs-down.
+          if ! aws ssm get-parameter --name /forge/ecs/https-listener-arn >/dev/null 2>&1; then
+            echo "ECS foundation is down; nothing deployed. ecs-up redeploys every service." >> "$GITHUB_STEP_SUMMARY"
+            echo 'targets=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Every service/env folder, excluding base.
+          envs_of() { find "ecs/services/$1" -mindepth 1 -maxdepth 1 -type d ! -name base 2>/dev/null || true; }
+          all() { for s in ecs/services/*/; do [[ -d $s ]] && envs_of "$(basename "$s")"; done; }
+
+          if [[ $DEPLOY_ALL == true || -z $BEFORE || $BEFORE =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            dirs=$(all)
+          else
+            dirs=$(git diff --name-only "$BEFORE" "$SHA" -- ecs/services/ | while IFS=/ read -r _ _ name dir _; do
+              # A base change affects every environment the service has.
+              if [[ $dir == base ]]; then envs_of "$name"; else echo "ecs/services/$name/$dir"; fi
+            done)
+          fi
+
+          # A folder that no longer exists was deleted: remove its stack.
+          targets=$(sort -u <<<"$dirs" | while read -r d; do
+            [[ -z $d ]] && continue
+            IFS=/ read -r _ _ name env <<<"$d"
+            action=deploy; [[ -d $d ]] || action=delete
+            echo "$name $env $action"
+          done | jq -R -s -c 'split("\n") | map(select(length > 0) | split(" ") | {name: .[0], env: .[1], action: .[2]})')
+
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          echo "Targets: \`$targets\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: "${{ matrix.action }} ${{ matrix.name }}-${{ matrix.env }}"
+    needs: detect
+    if: needs.detect.outputs.targets != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.targets) }}
+    # Back-to-back merges queue per stack instead of failing on an update in progress.
+    concurrency:
+      group: deploy-ecs-${{ matrix.name }}-${{ matrix.env }}
+      cancel-in-progress: false
+    env:
+      NAME: ${{ matrix.name }}
+      ENVIRONMENT: ${{ matrix.env }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.ECS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Look up CloudFormation role
+        id: role
+        run: |
+          arn=$(aws ssm get-parameter --name /forge/shared/ecs-cloudformation-role-arn \
+            --query Parameter.Value --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      - name: Install forge CLI
+        if: matrix.action == 'deploy'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$FORGE_VERSION" -R bjburke002/Forge \
+            -p forge_linux_amd64 -p checksums.txt -D "$RUNNER_TEMP/forge"
+          cd "$RUNNER_TEMP/forge"
+          sha256sum -c --ignore-missing checksums.txt
+          sudo install -m 0755 forge_linux_amd64 /usr/local/bin/forge
+
+      - name: Render template
+        if: matrix.action == 'deploy'
+        id: render
+        run: |
+          kustomize build "ecs/services/$NAME/$ENVIRONMENT" > forgeservice.yaml
+          forge render forgeservice.yaml --env "$ENVIRONMENT" > template.json
+          echo "stack=$(forge render forgeservice.yaml --env "$ENVIRONMENT" --stack-name)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy stack
+        if: matrix.action == 'deploy'
+        env:
+          STACK: ${{ steps.render.outputs.stack }}
+          ROLE_ARN: ${{ steps.role.outputs.arn }}
+        run: |
+          aws cloudformation deploy \
+            --stack-name "$STACK" \
+            --template-file template.json \
+            --role-arn "$ROLE_ARN" \
+            --tags Project=forge Backend=ecs Service="$NAME" Environment="$ENVIRONMENT" \
+            --no-fail-on-empty-changeset
+
+      # The folder is gone, so the name can't come from forge render; it follows ResourceName.
+      - name: Delete stack
+        if: matrix.action == 'delete'
+        env:
+          ROLE_ARN: ${{ steps.role.outputs.arn }}
+        run: |
+          stack="forge-$NAME-$ENVIRONMENT"
+          aws cloudformation delete-stack --stack-name "$stack" --role-arn "$ROLE_ARN"
+          aws cloudformation wait stack-delete-complete --stack-name "$stack"
