@@ -2,7 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 images:
 - name: payments-api
   newName: 241197444395.dkr.ecr.us-east-1.amazonaws.com/forge/payments-api
-  newTag: a5a154b85fbf032a3212a176f2825ad009f7b1ad
+  newTag: 50d50a3e13fd7a1db8d8a6193a4bb283b32d22e6
 kind: Kustomization
 namespace: billing-dev
 patches:
