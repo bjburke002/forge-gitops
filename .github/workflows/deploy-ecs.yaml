@@ -19,7 +19,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  FORGE_VERSION: v0.3.1
+  FORGE_VERSION: v0.4.2
 
 jobs:
   detect:
@@ -83,6 +83,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.targets != '[]'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -155,33 +156,31 @@ jobs:
             --certificate-identity "https://github.com/bjburke002/Forge/.github/workflows/build-image.yaml@refs/heads/main" \
             "$IMAGE"
 
-      # A failed first create leaves the stack in ROLLBACK_COMPLETE, which can't be updated and needs to be deleted and recreated
-      - name: Clear failed first deploy
+      - name: Clear failed stack
         if: matrix.action == 'deploy'
-        env:
-          STACK: ${{ steps.render.outputs.stack }}
-          ROLE_ARN: ${{ steps.role.outputs.arn }}
-        run: |
-          status=$(aws cloudformation describe-stacks --stack-name "$STACK" \
-            --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo NONE)
-          if [[ $status == ROLLBACK_COMPLETE ]]; then
-            echo "$STACK was in ROLLBACK_COMPLETE from a failed first deploy; deleted before redeploying." >> "$GITHUB_STEP_SUMMARY"
-            aws cloudformation delete-stack --stack-name "$STACK" --role-arn "$ROLE_ARN"
-            aws cloudformation wait stack-delete-complete --stack-name "$STACK"
-          fi
+        run: .github/scripts/clear-failed-stack.sh "${{ steps.render.outputs.stack }}" "${{ steps.role.outputs.arn }}"
+
+      - name: Find live target group
+        if: matrix.action == 'deploy'
+        id: live
+        run: .github/scripts/live-target-group.sh "${{ steps.render.outputs.stack }}" template.json >> "$GITHUB_OUTPUT"
 
       - name: Deploy stack
         if: matrix.action == 'deploy'
         env:
           STACK: ${{ steps.render.outputs.stack }}
           ROLE_ARN: ${{ steps.role.outputs.arn }}
+          ACTIVE: ${{ steps.live.outputs.active }}
         run: |
+          overrides=()
+          [[ -n $ACTIVE ]] && overrides=(--parameter-overrides "ActiveTargetGroup=$ACTIVE")
           aws cloudformation deploy \
             --stack-name "$STACK" \
             --template-file template.json \
             --role-arn "$ROLE_ARN" \
             --tags Project=forge Backend=ecs Service="$NAME" Environment="$ENVIRONMENT" \
-            --no-fail-on-empty-changeset
+            --no-fail-on-empty-changeset \
+            "${overrides[@]}"
 
       # The folder is gone, so the name can't come from forge render; it follows ResourceName.
       - name: Delete stack
