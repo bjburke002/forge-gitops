@@ -14,5 +14,8 @@ patches:
     spec:
       ingress:
         host: billing-dev.forgeappservices.com
+    env:
+      - name: LOG_LEVEL
+        value: debug
 resources:
 - ../base
