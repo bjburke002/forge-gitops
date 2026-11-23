@@ -14,7 +14,6 @@ patches:
     spec:
       ingress:
         host: billing-dev.forgeappservices.com
-        path: /api
       env:
         - name: LOG_LEVEL
           value: info
