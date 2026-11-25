@@ -19,7 +19,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  FORGE_VERSION: v0.4.5
+  FORGE_VERSION: v0.4.6
 
 jobs:
   detect:
