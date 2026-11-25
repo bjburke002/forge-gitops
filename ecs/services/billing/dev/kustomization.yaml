@@ -17,5 +17,7 @@ patches:
       env:
         - name: LOG_LEVEL
           value: info
+        - name: LEDGER_URL
+          value: "http://ledger"
 resources:
 - ../base
