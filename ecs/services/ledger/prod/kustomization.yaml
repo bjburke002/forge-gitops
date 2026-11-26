@@ -5,5 +5,15 @@ images:
   newTag: ed2f94481b72933262ec8faf229257c02cd6e9f7
 kind: Kustomization
 namespace: ledger-prod
+patches:
+- patch: |
+    apiVersion: forge.dev/v1alpha1
+    kind: ForgeService
+    metadata:
+      name: ledger
+    spec:
+      env:
+        - name: ERROR_RATE
+          value: "1"
 resources:
 - ../base
